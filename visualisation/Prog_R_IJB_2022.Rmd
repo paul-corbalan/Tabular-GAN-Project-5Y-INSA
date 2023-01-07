@@ -1,0 +1,1643 @@
+---
+title: "Simulation de donnees a baseline et de l'outcome"
+author: "Saint Pierre - Savy"
+date: "1/07/2022"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r,include=FALSE}
+
+#knitr::opts_chunk$set(fig.width=10, fig.height=7) 
+```
+
+```{r,include=FALSE}
+library(rvinecopulib)
+# library(VineCopula)
+# library(ggraph)
+library(e1071)
+library(GGally)
+library(caret)
+library(MASS)
+library(tidyverse)  
+library(corrr)
+library(lsr)
+library(cowplot)
+library(EnvStats)
+library(ggraph)
+
+
+#diabetes <- read.csv("C:/Users/nicolas.savy/Dropbox/PROJETS#RECHERCHE/7#BookChapter/Simulations/diabetes.csv")
+data <- read.csv("diabetes.csv")
+dim(data)
+
+# nettoyage des donn??es : les 0 sont des NA pour Glucose, BloodPressure,SkinThickness,Insulin,BMI
+diabetes<-data[data$Insulin!=0 & data$Glucose!=0 & data$BMI!=0,]
+summary(diabetes)
+dim(diabetes)
+
+# split Virtual Patient (VP) and virtual Outcome (VO)
+#separation var discrete et continue
+VP <- diabetes[,c(1:8)]
+VPDisc <- diabetes[,c(1,6)]
+VPDisc$Pregnancies = cut(VPDisc$Pregnancies,c(-0.1,0.9,100))
+levels(VPDisc$Pregnancies)<-c('No','Yes')
+VPDisc$BMI = cut(VPDisc$BMI,c(0,25,35,200))
+levels(VPDisc$BMI)<-c('<=25','25-35','>35')
+VPCont <- diabetes[,-c(1,6,9)]
+VPMod =as.data.frame(c(VPDisc,VPCont))
+
+VO <- as.data.frame(as.factor(diabetes[,9]))
+names(VO) = c('Pronostic')
+
+Data_Originale<-cbind(VPMod,VO)
+
+```
+
+## Description des variables explicatives et de l'outcome
+
+```{r,echo=F,message = FALSE,fig.width=10, fig.height=10}
+
+
+# ######################  Estimation correlation network mixed data #####################
+# #### Fonction trouvee sur internet
+# ###############################################################################
+# #
+# # cor2
+# # -- Compute correlations of columns of a dataframe of mixed types
+# #
+# ###############################################################################
+# #
+# # author  : Srikanth KS (talegari)
+# # license : GNU AGPLv3 (http://choosealicense.com/licenses/agpl-3.0/)
+# #
+# ###############################################################################
+# #' @title cor2
+# #' 
+# #' @description Compute correlations of columns of a dataframe of mixed types. 
+# #'   The dataframe is allowed to have columns of these four classes: integer, 
+# #'   numeric, factor and character. The character column is considered as 
+# #'   categorical variable.
+# #'  
+# #' @details The correlation is computed as follows: \itemize{
+# #'   
+# #'   \item integer/numeric pair: pearson correlation using `cor` function. The 
+# #'   valuelies between -1 and 1.
+# #'   
+# #'   \item integer/numeric - factor/categorical pair: correlation coefficient or
+# #'   squared root of R^2 coefficient of linear regression of integer/numeric
+# #'   variable over factor/categorical variable using `lm` function. The value
+# #'   lies between 0 and 1. \item factor/categorical pair: cramersV value is
+# #'   computed based on chisq test using `lsr::cramersV` function. The value lies
+# #'   between 0 and 1.
+# #'   }
+# #' 
+# #'   For a comprehensive implementation, use `polycor::hetcor`
+# #'     
+# #' @param df input data frame
+# #' 
+# #' @author Srikanth KS(gmail to sri dot teach)
+# #' 
+# #' @keywords GNU AGPLv3 (http://choosealicense.com/licenses/agpl-3.0/)
+# #' 
+# #' @examples
+# #' iris_cor <- cor2(iris)
+# #' corrplot::corrplot(iris_cor)
+# #' corrgram::corrgram(iris_cor)
+# #'   
+# cor2 = function(df){
+#   
+#   stopifnot(inherits(df, "data.frame"))
+#   stopifnot(sapply(df, class) %in% c("integer"
+#                                      , "numeric"
+#                                      , "factor"
+#                                      , "character"))
+#   
+#   cor_fun <- function(pos_1, pos_2){
+#     
+#     # both are numeric
+#     if(class(df[[pos_1]]) %in% c("integer", "numeric") &&
+#        class(df[[pos_2]]) %in% c("integer", "numeric")){
+#       r <- stats::cor(df[[pos_1]]
+#                       , df[[pos_2]]
+#                       , use = "pairwise.complete.obs"
+#       )
+#     }
+#     
+#     # one is numeric and other is a factor/character
+#     if(class(df[[pos_1]]) %in% c("integer", "numeric") &&
+#        class(df[[pos_2]]) %in% c("factor", "character")){
+#       r <- sqrt(
+#         summary(
+#           stats::lm(df[[pos_1]] ~ as.factor(df[[pos_2]])))[["r.squared"]])
+#     }
+#     
+#     if(class(df[[pos_2]]) %in% c("integer", "numeric") &&
+#        class(df[[pos_1]]) %in% c("factor", "character")){
+#       r <- sqrt(
+#         summary(
+#           stats::lm(df[[pos_2]] ~ as.factor(df[[pos_1]])))[["r.squared"]])
+#     }
+#     
+#     # both are factor/character
+#     if(class(df[[pos_1]]) %in% c("factor", "character") &&
+#        class(df[[pos_2]]) %in% c("factor", "character")){
+#       r <- lsr::cramersV(df[[pos_1]], df[[pos_2]], simulate.p.value = TRUE)
+#     }
+#     
+#     return(r)
+#   } 
+#   
+#   cor_fun <- Vectorize(cor_fun)
+#   
+#   # now compute corr matrix
+#   corrmat <- outer(1:ncol(df)
+#                    , 1:ncol(df)
+#                    , function(x, y) cor_fun(x, y)
+#   )
+#   
+#   rownames(corrmat) <- colnames(df)
+#   colnames(corrmat) <- colnames(df)
+#   
+#   return(corrmat)
+# }
+# 
+# ###  calcul des correlation grace ?? la fonction
+# res.cor <- cor2(VPMod)
+# res.cor
+# 
+# ###  representation du r??seau des correlations
+# network_plot(res.cor,min_cor = 0.2)
+
+
+# box and whisker plots for all attributes
+#ggpairs(VPMod)
+
+p<-ggpairs(Data_Originale, aes(colour=Pronostic), lower = list(continuous = wrap("smooth", alpha = 0.3, size=0.1)))
+for(i in 1:p$nrow) {
+  for(j in 1:p$ncol){
+    p[i,j] <- p[i,j] + 
+        scale_fill_manual(values=c("#00AFBB", "#E7B800", "#FC4E07")) +
+        scale_color_manual(values=c("#00AFBB", "#E7B800", "#FC4E07"))  
+  }
+}
+#p
+
+```
+
+## Taille de l'echantillon a simuler et nombre de simulations
+
+```{r,echo=F}
+## Tailel echantillon simule
+####################################################################
+N<-500
+cat("Taille de l'echantillon simule :", N,"\n")
+
+
+##  Nombre de simulations (nbre de p-value calculees) 
+####################################################################  
+Nsimu<-100  
+cat("Nombre de simulations :", Nsimu,"\n")
+  
+```
+
+## Simulation des donnees a baseline avec la methode continue
+
+```{r,echo=F}
+
+#### Fonction pour simuler avec la m??thode continue  #########
+Simulation_Continue<- function(DataBaseline)   {
+  
+###################### LEARNING ###############################
+MC = NULL
+VC = NULL
+VOriC = DataBaseline
+VOriC[,1] = as.numeric(VOriC[,1])
+VOriC[,2] = as.numeric(VOriC[,2])
+MC = colMeans(VOriC)
+VC = var(VOriC)
+
+##################### GENERATION of a SAMPLE of size N #################################
+VGenC = mvrnorm(N,MC,VC)
+VGenC = as.data.frame(VGenC)
+# Discretisation de Pregnancies
+TAB1 = table(VPMod[,1])
+P1 = prop.table(TAB1)
+CrV1 = MC[1]+sqrt(VC[1,1])*qnorm(P1[1],0,1)
+VGenC[,1]=as.factor(cut(VGenC[,1],c(min(VGenC[,1]),CrV1,max(VGenC[,1])),include.lowest=T))
+# Discretisation de BMI
+TAB2 = table(VPMod[,2])
+P2 = prop.table(TAB2)
+CrV21 = MC[2]+sqrt(VC[2,2])*qnorm(P2[1],0,1)
+CrV22 = MC[2]+sqrt(VC[2,2])*qnorm(P2[1]+P2[2],0,1)
+VGenC[,2]=as.factor(cut(VGenC[,2],c(min(VGenC[,2]),CrV21,CrV22,max(VGenC[,2])),include.lowest=T))
+
+levels(VGenC$Pregnancies)<-c('No','Yes')
+levels(VGenC$BMI)<-c('<=25','25-35','>35')
+return(VGenC)
+}
+
+```
+
+## Simulation des donnees a baseline avec la methode discrete
+
+```{r,echo=F,message=F}
+
+#### Fonction pour simuler avec la m??thode discrete  #########
+Simulation_Discrete<- function(DataBaseline)   {
+
+###################### LEARNING ###############################
+VPDisc<-DataBaseline[,1:2]
+VPCont<-DataBaseline[,3:8]
+  
+P = length(VPDisc$Pregnancies)
+L = NULL
+L[[1]] = which((VPDisc$Pregnancies == levels(VPDisc$Pregnancies)[1]) & (VPDisc$BMI == levels(VPDisc$BMI)[1]))
+L[[2]] = which((VPDisc$Pregnancies == levels(VPDisc$Pregnancies)[2]) & (VPDisc$BMI == levels(VPDisc$BMI)[1]))
+L[[3]] = which((VPDisc$Pregnancies == levels(VPDisc$Pregnancies)[1]) & (VPDisc$BMI == levels(VPDisc$BMI)[2])) 
+L[[4]] = which((VPDisc$Pregnancies == levels(VPDisc$Pregnancies)[2]) & (VPDisc$BMI == levels(VPDisc$BMI)[2]))
+L[[5]] = which((VPDisc$Pregnancies == levels(VPDisc$Pregnancies)[1]) & (VPDisc$BMI == levels(VPDisc$BMI)[3])) 
+L[[6]] = which((VPDisc$Pregnancies == levels(VPDisc$Pregnancies)[2]) & (VPDisc$BMI == levels(VPDisc$BMI)[3])) 
+proba = NULL
+for (i in 1:6){
+  proba = c(proba,length(L[[i]])/P)
+}
+M = NULL
+V = NULL
+for (i in 1:6){
+  M[[i]] = colMeans(VPCont[L[[i]],])
+  V[[i]] = var(VPCont[L[[i]],])
+}
+
+##################### GENERATION of a SAMPLE of size N #################################
+TEMP = sample(c("1","2","3","4","5","6"), N, replace=TRUE, prob = proba)
+VGen = matrix(0,ncol = 8, nrow = N)
+for (i in 1:N){
+  if ( TEMP[i] == "1" ) { 
+    VGen[i,1] = levels(VPDisc$Pregnancies)[1]
+    VGen[i,2] = levels(VPDisc$BMI)[1] 
+    VGen[i,3] = mvrnorm(1,M[[1]],V[[1]])[1]
+    VGen[i,4] = mvrnorm(1,M[[1]],V[[1]])[2]
+    VGen[i,5] = mvrnorm(1,M[[1]],V[[1]])[3]
+    VGen[i,6] = mvrnorm(1,M[[1]],V[[1]])[4]
+    VGen[i,7] = mvrnorm(1,M[[1]],V[[1]])[5]
+    VGen[i,8] = mvrnorm(1,M[[1]],V[[1]])[6]}
+  if ( TEMP[i] == "2" ) { 
+    VGen[i,1] = levels(VPDisc$Pregnancies)[2]
+    VGen[i,2] = levels(VPDisc$BMI)[1]
+    VGen[i,3] = mvrnorm(1,M[[2]],V[[2]])[1]
+    VGen[i,4] = mvrnorm(1,M[[2]],V[[2]])[2]
+    VGen[i,5] = mvrnorm(1,M[[2]],V[[2]])[3]
+    VGen[i,6] = mvrnorm(1,M[[2]],V[[2]])[4]
+    VGen[i,7] = mvrnorm(1,M[[2]],V[[2]])[5]
+    VGen[i,8] = mvrnorm(1,M[[2]],V[[2]])[6]}
+  if ( TEMP[i] == "3" ) { 
+    VGen[i,1] = levels(VPDisc$Pregnancies)[1]
+    VGen[i,2] = levels(VPDisc$BMI)[2]
+    VGen[i,3] = mvrnorm(1,M[[3]],V[[4]])[1]
+    VGen[i,4] = mvrnorm(1,M[[3]],V[[4]])[2]
+    VGen[i,5] = mvrnorm(1,M[[3]],V[[4]])[3]
+    VGen[i,6] = mvrnorm(1,M[[3]],V[[4]])[4]
+    VGen[i,7] = mvrnorm(1,M[[3]],V[[4]])[5]
+    VGen[i,8] = mvrnorm(1,M[[3]],V[[4]])[6]}
+  if ( TEMP[i] == "4" ) { 
+    VGen[i,1] = levels(VPDisc$Pregnancies)[2]
+    VGen[i,2] = levels(VPDisc$BMI)[2]
+    VGen[i,3] = mvrnorm(1,M[[5]],V[[5]])[1]
+    VGen[i,4] = mvrnorm(1,M[[5]],V[[5]])[2]
+    VGen[i,5] = mvrnorm(1,M[[5]],V[[5]])[3]
+    VGen[i,6] = mvrnorm(1,M[[5]],V[[5]])[4]
+    VGen[i,7] = mvrnorm(1,M[[5]],V[[5]])[5]
+    VGen[i,8] = mvrnorm(1,M[[5]],V[[5]])[6]}
+  if ( TEMP[i] == "5" ) { 
+    VGen[i,1] = levels(VPDisc$Pregnancies)[1] 
+    VGen[i,2] = levels(VPDisc$BMI)[3]
+    VGen[i,3] = mvrnorm(1,M[[6]],V[[6]])[1]
+    VGen[i,4] = mvrnorm(1,M[[6]],V[[6]])[2]
+    VGen[i,5] = mvrnorm(1,M[[6]],V[[6]])[3]
+    VGen[i,6] = mvrnorm(1,M[[6]],V[[6]])[4]
+    VGen[i,7] = mvrnorm(1,M[[6]],V[[6]])[5]
+    VGen[i,8] = mvrnorm(1,M[[6]],V[[6]])[6]}
+  if ( TEMP[i] == "6" ) { 
+    VGen[i,1] = levels(VPDisc$Pregnancies)[2]
+    VGen[i,2] = levels(VPDisc$BMI)[3]
+    VGen[i,3] = mvrnorm(1,M[[1]],V[[1]])[1]
+    VGen[i,4] = mvrnorm(1,M[[1]],V[[1]])[2]
+    VGen[i,5] = mvrnorm(1,M[[1]],V[[1]])[3]
+    VGen[i,6] = mvrnorm(1,M[[1]],V[[1]])[4]
+    VGen[i,7] = mvrnorm(1,M[[1]],V[[1]])[5]
+    VGen[i,8] = mvrnorm(1,M[[1]],V[[1]])[6]}
+}
+VGen = as.data.frame(VGen)
+for (i in 3:8){VGen[,i] = as.numeric(as.character(VGen[,i]))}
+
+colnames(VGen)<-colnames(DataBaseline)
+return(VGen)
+}
+
+```
+
+## Simulation des donnees a baseline avec la methode Vine copula (structure data-driven)
+
+```{r,echo=F,message=F}
+
+#### Fonction pour simuler avec la m??thode des r-vine copula  #########
+Simulation_Copule<- function(DataBaseline)   {
+
+  
+######################  ESTIMATION    ######################################
+#Pseudo inverse variables continues
+U_cont<-pseudo_obs(DataBaseline[,3:8])
+
+#Distribution des 2 variables discretes
+disc_1<-as.integer(DataBaseline[,1])-1
+disc_2<-as.integer(DataBaseline[,2])-1
+
+freq_disc1<-prop.table(table(DataBaseline[,1]))
+freq_disc2<-prop.table(table(DataBaseline[,2]))
+
+Freq_disc_t1 <- cbind(pdiscrete(disc_1+1,freq_disc1),pdiscrete(disc_2+1,freq_disc2))
+Freq_disc_t0 <- cbind(pdiscrete(disc_1,freq_disc1),pdiscrete(disc_2,freq_disc2))
+#densite :ddiscrete(x+1,freq)
+#distribution function : pdiscrete(x+1,freq)
+#quantile function : qdiscrete(u[, 1],freq) - 1
+
+# Infos necessaire pour copule avec donnees mixte
+U_mixte<-cbind(Freq_disc_t1,U_cont,Freq_disc_t0)
+
+## Model for mixed data
+fit_DataDriven <- vinecop(U_mixte, var_types = c("d","d", rep("c", 6)))
+#summary(fit_DataDriven)
+#plot(fit_DataDriven)
+#contour(fit_DataDriven)
+
+# definition de la distribution de la r-vine
+Fit_dist<-vinecop_dist(fit_DataDriven$pair_copulas,fit_DataDriven$structure,fit_DataDriven$var_types)
+
+######################  SIMULATION   ######################################
+
+# Fonction pour passer des uniformes aux donnees avec l'??chelle d'orgine
+###    Fonction inverse de Pseudo Obs 
+PseudoObsInverse<-function(Data,SimUniformData) {
+PsInverse<-list()
+for (j in 1:ncol(Data)){ 
+     ecdfj<-ecdf(Data[,j])
+     ECDFvar<-get("x",environment(ecdfj))
+     ECDFjump<-get("y",environment(ecdfj))
+     PsInverse[[j]]<-stepfun(ECDFjump[-length(ECDFjump)],ECDFvar) 
+  } 
+SimData<-matrix(0,nrow(SimUniformData),ncol(SimUniformData))
+for (j in 1:ncol(SimUniformData)){ SimData[,j]<-PsInverse[[j]](SimUniformData[,j]) }
+SimData<-as.data.frame(SimData)
+return(SimData)
+}
+
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine
+# taille de l'??chantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels
+Data_Simu<-PseudoObsInverse(DataBaseline,U_Simu)
+for (i in 1:2){Data_Simu[,i] = as.factor(Data_Simu[,i])}
+for (i in 3:8){Data_Simu[,i] = as.numeric(as.character(Data_Simu[,i]))}
+
+colnames(Data_Simu)<-colnames(DataBaseline)
+levels(Data_Simu[,1])<-c('No','Yes')
+levels(Data_Simu[,2])<-c('<=25','25-35','>35')
+
+return(Data_Simu)
+}
+
+
+# ## select by log-likelihood criterion from one-paramter families
+# fit <- vinecop(u, family_set = "onepar", selcrit = "bic")
+# summary(fit)
+# 
+# ## Gaussian D-vine
+# fit <- vinecop(u, structure = dvine_structure(1:5), family = "gauss")
+# plot(fit)
+# contour(fit)
+# 
+# ## Partial structure selection with only first tree specified
+# structure <- rvine_structure(order = 1:5, list(rep(5, 4)))
+# structure
+# fit <- vinecop(u, structure = structure, family = "gauss")
+# plot(fit)
+# 
+# ## 1-truncated model with random structure
+# fit <- vinecop(u, structure = rvine_structure_sim(5), trunc_lvl = 1)
+# contour(fit)
+```
+
+## Apprentissage via Random Forest pour predire l'outcome
+
+```{r,echo=F,message=F}
+
+####################################################################
+##  estimation du "modele" de prediction avec les donnees origine
+####################################################################
+
+# Run algorithms using 10-fold cross validation
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+# Random Forest
+set.seed(7)
+fit.rf <- train(Pronostic~., data=Data_Originale, method="rf", metric=metric, trControl=control)
+
+#fit.rf$finalModel$confusion
+
+####################################################################
+#### Fonction pour simuler l'outcome ?? partir du "modele" et des donn??es simulees
+####   En tenant compte ou pas de l'erreur de prediction
+####################################################################
+Simulation_DataOutcome<- function(Modele,Covariables)   {
+     
+  # prediction sans erreur
+     predictionsSE = NULL
+     predictionsSE <- predict(Modele,Covariables)
+     
+  # prediction avec erreur
+     n<-nrow(Covariables)
+     predictionsAE = NULL
+     for (i in 1:n) {
+       RAN = runif(1)
+       if (predictionsSE[i] == "1") { if (RAN < fit.rf$finalModel$confusion[1,3]) {predictionsAE[i] = "0" } 
+                                    else {predictionsAE[i] = "1" }}
+       if (predictionsSE[i] == "0")  { if (RAN < fit.rf$finalModel$confusion[2,3]) {predictionsAE[i] = "1" } 
+                                     else {predictionsAE[i] = "0" }}      }
+
+      predictionsAE = as.factor(predictionsAE)
+
+      DataOutcome_Simu  <- cbind(Covariables,predictionsSE,predictionsAE)
+      return(DataOutcome_Simu)
+   }
+
+####################################################################
+#### Fonction pour calculer les p-values
+####################################################################
+CalculPvalue<- function(DataOutcome)   {
+  # pvalues pour outcome sans erreur
+  Pvalue_SE<-NULL
+  Pvalue_SE[1]<-chisq.test(DataOutcome[,1], DataOutcome[,9])$p.value
+  Pvalue_SE[2]<-chisq.test(DataOutcome[,2], DataOutcome[,9])$p.value
+  for (i in 3:8) {  Pvalue_SE[i]<-t.test(DataOutcome[,i] ~ DataOutcome[,9])$p.value  }
+  # pvalues pour outcome avec erreur
+  Pvalue_AE<-NULL
+  Pvalue_AE[1]<-chisq.test(DataOutcome[,1], DataOutcome[,10])$p.value
+  Pvalue_AE[2]<-chisq.test(DataOutcome[,2], DataOutcome[,10])$p.value
+  for (i in 3:8) {  Pvalue_AE[i]<-t.test(DataOutcome[,i] ~ DataOutcome[,10])$p.value  }
+  
+  return(list(p_SE=Pvalue_SE,p_AE=Pvalue_AE))
+   }
+
+```
+
+## Representation d'une simulation avec la methode discrete
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12,eval=F}
+
+DataSimu_Discrete<-Simulation_Discrete(VPMod)
+Simu_Discrete<-Simulation_DataOutcome(fit.rf, DataSimu_Discrete)
+
+ggpairs(DataSimu_Discrete)
+
+p<-ggpairs(Simu_Discrete[-9], aes(colour=predictionsAE), lower = list(continuous = wrap("smooth", alpha = 0.3, size=0.1)))
+for(i in 1:p$nrow) {
+  for(j in 1:p$ncol){
+    p[i,j] <- p[i,j] + 
+        scale_fill_manual(values=c("#00AFBB", "#E7B800", "#FC4E07")) +
+        scale_color_manual(values=c("#00AFBB", "#E7B800", "#FC4E07"))  
+  }
+}
+p
+
+
+```
+
+## Representation d'une simulation avec la methode Continue
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12,eval=F}
+
+DataSimu_Continue<-Simulation_Continue(VPMod)
+Simu_Continue<-Simulation_DataOutcome(fit.rf, DataSimu_Continue)
+
+ggpairs(DataSimu_Continue)
+p<-ggpairs(Simu_Continue[-9], aes(colour=predictionsAE), lower = list(continuous = wrap("smooth", alpha = 0.3, size=0.1)))
+for(i in 1:p$nrow) {
+  for(j in 1:p$ncol){
+    p[i,j] <- p[i,j] + 
+        scale_fill_manual(values=c("#00AFBB", "#E7B800", "#FC4E07")) +
+        scale_color_manual(values=c("#00AFBB", "#E7B800", "#FC4E07"))  
+  }
+}
+p
+
+```
+
+## Representation d'une simulation avec la methode Copula
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12,eval=F}
+
+DataSimu_Copule<-Simulation_Copule(VPMod)
+Simu_Copule<-Simulation_DataOutcome(fit.rf, DataSimu_Copule)
+
+ggpairs(DataSimu_Copule)
+p<-ggpairs(Simu_Copule[-9], aes(colour=predictionsAE), lower = list(continuous = wrap("smooth", alpha = 0.3, size=0.1)))
+for(i in 1:p$nrow) {
+  for(j in 1:p$ncol){
+    p[i,j] <- p[i,j] + 
+        scale_fill_manual(values=c("#00AFBB", "#E7B800", "#FC4E07")) +
+        scale_color_manual(values=c("#00AFBB", "#E7B800", "#FC4E07"))  
+  }
+}
+p
+```
+
+## Representation de certaines correlations pour les 3 methode + originale
+
+```{r,echo=F,message=F,fig.width=7, fig.height=6,dpi=600,eval=F}
+
+
+plot_grid( ggmatrix_gtable(ggpairs(VPMod[,c(3,5)],title ="Original data")),
+           ggmatrix_gtable(ggpairs(DataSimu_Discrete[,c(3,5)],title ="Simulation : discrete approach")),
+           ggmatrix_gtable(ggpairs(DataSimu_Continue[,c(3,5)],title ="Simulation : continuous approach")),
+           ggmatrix_gtable(ggpairs(DataSimu_Copule[,c(3,5)],title ="Simulation : Copula approach")),nrow=2)
+
+plot_grid( ggmatrix_gtable(ggpairs(VPMod[,c(4,8)],title ="Original data")),
+           ggmatrix_gtable(ggpairs(DataSimu_Discrete[,c(4,8)],title ="Simulation : discrete approach")),
+           ggmatrix_gtable(ggpairs(DataSimu_Continue[,c(4,8)],title ="Simulation : continuous approach")),
+           ggmatrix_gtable(ggpairs(DataSimu_Copule[,c(4,8)],title ="Simulation : Copula approach")),nrow=2)
+
+```
+
+## Population d'origine
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+ggpairs(Data_Originale[,c(1:9)])
+
+```
+
+## Individus virtuels issus de la population d'origine :
+
+### simulations de 1000 individus suivant les estimations de la copule et des marginales (empirique)
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+# simulation de donnees avec la m??thode copule N=500
+N<-1000
+
+# estimation de la copule sur les vraies donnees
+######################  ESTIMATION    ######################################
+#Pseudo inverse variables continues
+U_cont<-pseudo_obs(Data_Originale[,3:8])
+
+#Distribution des 2 variables discretes
+disc_1<-as.integer(Data_Originale[,1])-1
+disc_2<-as.integer(Data_Originale[,2])-1
+
+freq_disc1<-prop.table(table(Data_Originale[,1]))
+freq_disc2<-prop.table(table(Data_Originale[,2]))
+
+Freq_disc_t1 <- cbind(pdiscrete(disc_1+1,freq_disc1),pdiscrete(disc_2+1,freq_disc2))
+Freq_disc_t0 <- cbind(pdiscrete(disc_1,freq_disc1),pdiscrete(disc_2,freq_disc2))
+#densite :ddiscrete(x+1,freq)
+#distribution function : pdiscrete(x+1,freq)
+#quantile function : qdiscrete(u[, 1],freq) - 1
+
+# Infos necessaire pour copule avec donnees mixte
+U_mixte<-cbind(Freq_disc_t1,U_cont,Freq_disc_t0)
+
+## Model for mixed data
+fit_DataDriven <- vinecop(U_mixte, var_types = c("d","d", rep("c", 6)))
+# definition de la distribution de la r-vine
+Fit_dist<-vinecop_dist(fit_DataDriven$pair_copulas,fit_DataDriven$structure,fit_DataDriven$var_types)
+
+
+ plot(fit_DataDriven,edge_labels="pair", tree=c(1,2))
+plot(fit_DataDriven,edge_labels="family_tau", tree=1)
+
+# Simulation en fonction du modele de copule et des marginales 
+######################  SIMULATION    ######################################
+
+# Fonction pour passer des uniformes aux donnees avec l'echelle d'origine
+###    Fonction inverse de Pseudo Obs 
+PseudoObsInverse<-function(Data,SimUniformData) {
+PsInverse<-list()
+for (j in 1:ncol(Data)){ 
+     ecdfj<-ecdf(Data[,j])
+     ECDFvar<-get("x",environment(ecdfj))
+     ECDFjump<-get("y",environment(ecdfj))
+     PsInverse[[j]]<-stepfun(ECDFjump[-length(ECDFjump)],ECDFvar) 
+  } 
+SimData<-matrix(0,nrow(SimUniformData),ncol(SimUniformData))
+for (j in 1:ncol(SimUniformData)){ SimData[,j]<-PsInverse[[j]](SimUniformData[,j]) }
+SimData<-as.data.frame(SimData)
+return(SimData)
+}
+
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+SimuVar<-PseudoObsInverse(Data_Originale,U_Simu)
+for (i in 1:2){SimuVar[,i] = as.factor(SimuVar[,i])}
+for (i in 3:8){SimuVar[,i] = as.numeric(as.character(SimuVar[,i]))}
+
+colnames(SimuVar)<-colnames(Data_Originale[,c(1:8)])
+levels(SimuVar[,1])<-c('No','Yes')
+levels(SimuVar[,2])<-c('<=25','25-35','>35')
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu<-Simulation_DataOutcome(fit.rf, SimuVar)
+
+############### representations graphiques   ####################@
+#ggpairs(SimuVar)
+
+#ggpairs(Simu)
+
+
+```
+
+## Individus virtuels issus de la population d'origine : meme support (troncature) !!
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique, sauf une marginale modelisee par une loi log normale
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+library(fitdistrplus)
+library(truncdist)
+library(truncnorm)
+
+######################################   fit de la meilleure distribution pour Glucose     ######################################
+
+fit_Glucose_norm <- fitdist(Data_Originale$Glucose, "norm")
+fit_Glucose_lnorm <- fitdist(Data_Originale$Glucose, "lnorm")
+fit_Glucose_gamma <- fitdist(Data_Originale$Glucose, "gamma")
+fit_Glucose_weibull <- fitdist(Data_Originale$Glucose, "weibull")
+
+# par(mfrow=c(2,2))
+# cdfcomp(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), legendtext=c("normal", "lognormal", "gamma","Weibull"))
+# denscomp(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), legendtext=c("normal", "lognormal", "gamma","Weibull"))
+# qqcomp(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), legendtext=c("normal", "lognormal", "gamma","Weibull"))
+# ppcomp(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), legendtext=c("normal", "lognormal", "gamma","Weibull"))
+# gofstat(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), fitnames=c("normal", "lognormal", "gamma","Weibull"))
+
+####################################### Simulation suivant le meilleur modele parametrique pour la distribution marginale
+######################  Preparation des donnees    ######################################
+# Modification des donnees univariee ... nouvelle variable glucose (simuler via modele parametrique) 
+GlucoseNew<-rlnorm(nrow(Data_Originale),meanlog=4.778,sdlog=0.249)
+
+# Simulation d'une distribution marginale via des loi parametrique tronquee (ici loi normale, valeur >140 ) 
+#GlucoseNew <- rtruncnorm( nrow(Data_Originale), a=140,b=300 ,mean=122.63,sd=30.82)
+
+# attention ... si observations en dehors du support original (<56, >198), il faut en générer une autre !!
+#summary(Data_Originale$Glucose)
+#summary(GlucoseNew)
+for (i in 1:length(GlucoseNew)) {
+     if (GlucoseNew[i]>198 | GlucoseNew[i]<56)  {
+      GlucoseNew[i]<-rlnorm(1,meanlog=4.778,sdlog=0.249)
+     }
+}
+for (i in 1:length(GlucoseNew)) {
+     if (GlucoseNew[i]>198 | GlucoseNew[i]<56)  {
+      GlucoseNew[i]<-rlnorm(1,meanlog=4.778,sdlog=0.249)
+     }
+}
+#summary(GlucoseNew)
+
+# definition de la  base de donnees 
+Data_modif<-cbind(Data_Originale[,1:2],GlucoseNew,Data_Originale[,4:8])
+
+# Simulation en fonction du modele de copule et des marginales (dont une modifiee)
+######################  SIMULATION    ######################################
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine (estimee sur donnees originales)
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+SimuVar1<-PseudoObsInverse(Data_modif,U_Simu)
+for (i in 1:2){SimuVar1[,i] = as.factor(SimuVar1[,i])}
+for (i in 3:8){SimuVar1[,i] = as.numeric(as.character(SimuVar1[,i]))}
+colnames(SimuVar1)<-colnames(Data_Originale[,c(1:8)])
+levels(SimuVar1[,1])<-c('No','Yes')
+levels(SimuVar1[,2])<-c('<=25','25-35','>35')
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu1<-Simulation_DataOutcome(fit.rf, SimuVar1)
+
+
+######################  Representations graphiques    ######################################
+#ggpairs(SimuVar1)
+
+
+
+```
+
+## Individus virtuels issus de la population d'origine : meme support !!
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique, sauf une marginale modelisee par une loi normale tronquee
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+######################################   fit de la meilleure distribution pour Glucose     ######################################
+
+fit_Glucose_norm <- fitdist(Data_Originale$Glucose, "norm")
+fit_Glucose_lnorm <- fitdist(Data_Originale$Glucose, "lnorm")
+fit_Glucose_gamma <- fitdist(Data_Originale$Glucose, "gamma")
+fit_Glucose_weibull <- fitdist(Data_Originale$Glucose, "weibull")
+
+# par(mfrow=c(2,2))
+# cdfcomp(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), legendtext=c("normal", "lognormal", "gamma","Weibull"))
+# denscomp(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), legendtext=c("normal", "lognormal", "gamma","Weibull"))
+# qqcomp(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), legendtext=c("normal", "lognormal", "gamma","Weibull"))
+# ppcomp(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), legendtext=c("normal", "lognormal", "gamma","Weibull"))
+# gofstat(list(fit_Glucose_norm, fit_Glucose_lnorm, fit_Glucose_gamma, fit_Glucose_weibull), fitnames=c("normal", "lognormal", "gamma","Weibull"))
+
+######################  Preparation des donnees    ######################################
+# Modification des donnees univariee ... nouvelle variable glucose (simuler via modele parametrique normal tronquee) 
+#GlucoseNew<-rweibull(nrow(Data_Originale),shape=4.225,scale=134.705)
+
+GlucoseNew <- rtruncnorm( nrow(Data_Originale), a=56,b=198 ,mean=mean(Data_Originale[,3]),sd=sd(Data_Originale[,3]))
+
+hist(GlucoseNew)
+
+# Simulation d'une distribution marginale via des loi parametrique tronquee (ici loi normale, valeur >140 ) 
+#GlucoseNew <- rtruncnorm( nrow(Data_Originale), a=140,b=300 ,mean=122.63,sd=30.82)
+
+# attention ... si observations en dehors du support original (<56, >198), il faut en générer une autre !!
+#summary(Data_Originale$Glucose)
+#summary(GlucoseNew)
+# for (i in 1:length(GlucoseNew)) {
+#      if (GlucoseNew[i]>198 | GlucoseNew[i]<56)  {
+#       GlucoseNew[i]<-rlnorm(1,meanlog=4.778,sdlog=0.249)
+#      }
+# }
+# for (i in 1:length(GlucoseNew)) {
+#      if (GlucoseNew[i]>198 | GlucoseNew[i]<56)  {
+#       GlucoseNew[i]<-rlnorm(1,meanlog=4.778,sdlog=0.249)
+#      }
+# }
+#summary(GlucoseNew)
+
+# definition de la  base de donnees 
+Data_modif<-cbind(Data_Originale[,1:2],GlucoseNew,Data_Originale[,4:8])
+
+# Simulation en fonction du modele de copule et des marginales (dont une modifiee)
+######################  SIMULATION    ######################################
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine (estimee sur donnees originales)
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+SimuVar2<-PseudoObsInverse(Data_modif,U_Simu)
+for (i in 1:2){SimuVar2[,i] = as.factor(SimuVar2[,i])}
+for (i in 3:8){SimuVar2[,i] = as.numeric(as.character(SimuVar2[,i]))}
+colnames(SimuVar2)<-colnames(Data_Originale[,c(1:8)])
+levels(SimuVar2[,1])<-c('No','Yes')
+levels(SimuVar2[,2])<-c('<=25','25-35','>35')
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu2<-Simulation_DataOutcome(fit.rf, SimuVar2)
+
+
+######################  Representations graphiques    ######################################
+#ggpairs(SimuVar2)
+
+
+
+```
+
+## Representation de certaines correlations pour donnees originales, simulees non param, simulee param 1 et simulee param 2 (dans les 2 dernier cas, la distrib est tronquee au support de la variable)
+
+```{r,echo=F,message=F,fig.width=7, fig.height=6,dpi=600}
+
+colnames(Simu)[9]<-"Prediction"
+colnames(Simu1)[9]<-"Prediction"
+colnames(Simu2)[9]<-"Prediction"
+plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[,c(3,6,9)],title ="Original data")),
+           ggmatrix_gtable(ggpairs(Simu[,c(3,6,9)],title ="Simulation using empirical distribution for Glucose")),
+           ggmatrix_gtable(ggpairs(Simu1[,c(3,6,9)],title ="Simulation using Lognormal distribution for Glucose")),
+           ggmatrix_gtable(ggpairs(Simu2[,c(3,6,9)],title ="Simulation using Normal distribution for Glucose")),
+           nrow=2)
+
+
+# plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[,c(3,6)],title ="Original data")),
+#            ggmatrix_gtable(ggpairs(SimuVar[,c(3,6)],title ="Simulation using empirical distribution for Glucose")),
+#            ggmatrix_gtable(ggpairs(SimuVar1[,c(3,6)],title ="Simulation using Lognormal distribution for Glucose")),
+#            ggmatrix_gtable(ggpairs(SimuVar2[,c(3,6)],title ="Simulation using Normal distribution for Glucose")),
+#            nrow=2)
+# 
+# plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[,c(3,9)],title ="Original data")),
+#            ggmatrix_gtable(ggpairs(Simu[,c(3,9)],title ="Standard simulation")),
+#            ggmatrix_gtable(ggpairs(Simu1[,c(3,9)],title ="Simulation with lognormal distribution for Glucose")),
+#            ggmatrix_gtable(ggpairs(Simu2[,c(3,9)],title ="Simulation with normal distribution for Glucose")),nrow=2)
+# 
+# plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[,c(3,9)],title ="Original data")),
+#            ggmatrix_gtable(ggpairs(Simu[,c(3,10)],title ="Standard simulation")),
+#            ggmatrix_gtable(ggpairs(Simu1[,c(3,10)],title ="Simulation with lognormal distribution for Glucose")),
+#            ggmatrix_gtable(ggpairs(Simu2[,c(3,10)],title ="Simulation with normal distribution for Glucose")),nrow=2)
+
+# c(4,8)
+# c(3,6)
+# c(3,8)
+
+```
+
+# Individus virtuels dans un intervalle de la population d'origine
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique)
+
+### filtering pour conserver les individus satisfaisant un critere d'inclusion
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+# simulation de donnees avec la methode copule N=3000
+NN<-6000
+
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(NN,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+Simu_afiltrer<-PseudoObsInverse(Data_Originale,U_Simu)
+for (i in 1:2){Simu_afiltrer[,i] = as.factor(Simu_afiltrer[,i])}
+for (i in 3:8){Simu_afiltrer[,i] = as.numeric(as.character(Simu_afiltrer[,i]))}
+colnames(Simu_afiltrer)<-colnames(Data_Originale[,c(1:8)])
+levels(Simu_afiltrer[,1])<-c('No','Yes')
+levels(Simu_afiltrer[,2])<-c('<=25','25-35','>35')
+
+# Restriction de la population simulee par filtration : uniquement patient tel que glucose >= 140 
+# attention ... avec estimation empirique, toutes les simulation sont inférieures au max du support d'origine
+SimuVar3<-Simu_afiltrer[Simu_afiltrer$Glucose > 100 & Simu_afiltrer$Glucose <=150,]
+# on garde uniquement 500 individus au hasard
+SimuVar3<-SimuVar3[sample(1:nrow(SimuVar3), N), ]
+
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu3<-Simulation_DataOutcome(fit.rf, SimuVar3)
+
+######################  Representations graphiques    ######################################
+
+#ggpairs(SimuVar3)
+
+
+```
+
+# Individus virtuels dans un intervalle de la population d'origine
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique) et une param
+
+### ici une gaussienne ajuste sur les données et tronquee a 140
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+######################################   fit de la meilleure distribution pour Glucose     ######################################
+######################  Preparation des donnees    ######################################
+# Modification des donnees univariee ... nouvelle variable glucose (simuler via modele parametrique normal tronquee) 
+#GlucoseNew<-rweibull(nrow(Data_Originale),shape=4.225,scale=134.705)
+
+GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 101, b=150, mean=mean(Data_Originale[,3]),sd=sd(Data_Originale[,3]))
+#hist(GlucoseNew)
+# definition de la  base de donnees 
+Data_modif<-cbind(Data_Originale[,1:2],GlucoseNew,Data_Originale[,4:8])
+
+# Simulation en fonction du modele de copule et des marginales (dont une modifiee)
+######################  SIMULATION    ######################################
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine (estimee sur donnees originales)
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+SimuVar4<-PseudoObsInverse(Data_modif,U_Simu)
+for (i in 1:2){SimuVar4[,i] = as.factor(SimuVar4[,i])}
+for (i in 3:8){SimuVar4[,i] = as.numeric(as.character(SimuVar4[,i]))}
+colnames(SimuVar4)<-colnames(Data_Originale[,c(1:8)])
+levels(SimuVar4[,1])<-c('No','Yes')
+levels(SimuVar4[,2])<-c('<=25','25-35','>35')
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu4<-Simulation_DataOutcome(fit.rf, SimuVar4)
+
+
+######################  Representations graphiques    ######################################
+#ggpairs(SimuVar2)
+
+```
+
+# Individus virtuels dans un intervalle de la population d'origine
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique) et une param
+
+### Une marginale avec une loi parametrique differente (par ex biblio) de la loi des données ... ici lognormale tronquee
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+######################################   fit de la meilleure distribution pour Glucose     ######################################
+######################  Preparation des donnees    ######################################
+# Modification des donnees univariee ... nouvelle variable glucose (simuler via modele parametrique normal tronquee) 
+#GlucoseNew<-rweibull(nrow(Data_Originale),shape=4.225,scale=134.705)
+
+#GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 140, mean=160,sd=50)
+#GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 101, b=150, mean=120,sd=30)
+GlucoseNew <- rlnormTrunc( nrow(Data_Originale), min= 101, max=150, meanlog=120,sdlog=30)
+
+
+# definition de la  base de donnees 
+Data_modif<-cbind(Data_Originale[,1:2],GlucoseNew,Data_Originale[,4:8])
+
+# Simulation en fonction du modele de copule et des marginales (dont une modifiee)
+######################  SIMULATION    ######################################
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine (estimee sur donnees originales)
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+SimuVar5<-PseudoObsInverse(Data_modif,U_Simu)
+for (i in 1:2){SimuVar5[,i] = as.factor(SimuVar5[,i])}
+for (i in 3:8){SimuVar5[,i] = as.numeric(as.character(SimuVar5[,i]))}
+colnames(SimuVar5)<-colnames(Data_Originale[,c(1:8)])
+levels(SimuVar5[,1])<-c('No','Yes')
+levels(SimuVar5[,2])<-c('<=25','25-35','>35')
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu5<-Simulation_DataOutcome(fit.rf, SimuVar5)
+
+
+######################  Representations graphiques    ######################################
+#ggpairs(SimuVar2)
+
+```
+
+## Representation de certaines correlations pour donnees originales, simulees standard et filtering, simulee normal fit et filtering et simulee avec gaussienne tronquee
+
+```{r,echo=F,message=F,fig.width=7, fig.height=6,dpi=600}
+
+colnames(Simu3)[9]<-"Prediction"
+colnames(Simu4)[9]<-"Prediction"
+colnames(Simu5)[9]<-"Prediction" 
+plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[Data_Originale[,3]>100 & Data_Originale[,3]<=150,c(3,6,9)],title ="Filtering the original data")),
+           ggmatrix_gtable(ggpairs(Simu3[,c(3,6,9)],title ="Filtering the simulated data (based on empirical distribution)")),
+           ggmatrix_gtable(ggpairs(Simu4[,c(3,6,9)],title ="Filtering the simulated data (based on Normal distribution)")),
+           ggmatrix_gtable(ggpairs(Simu5[,c(3,6,9)],title ="Filtering the simulated data (based on Lognormal distribution)")),nrow=2)
+               
+               
+
+# plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[,c(3,6)],title ="Original data")),
+#            ggmatrix_gtable(ggpairs(SimuVar3[,c(3,6)],title ="Standard simulation and filtering")),
+#            ggmatrix_gtable(ggpairs(SimuVar4[,c(3,6)],title ="Simulation with fitted normal distribution and filtering")),
+#            ggmatrix_gtable(ggpairs(SimuVar5[,c(3,6)],title ="Simulation with a different normal distribution")),nrow=2)
+# 
+# plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[,c(3,9)],title ="Original data")),
+#            ggmatrix_gtable(ggpairs(Simu3[,c(3,9)],title ="Standard simulation and filtering")),
+#            ggmatrix_gtable(ggpairs(Simu4[,c(3,9)],title ="Simulation with fitted normal distribution and filtering")),
+#            ggmatrix_gtable(ggpairs(Simu5[,c(3,9)],title ="Simulation with a different normal distribution")),nrow=2)
+# 
+# plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[,c(3,9)],title ="Original data")),
+#            ggmatrix_gtable(ggpairs(Simu3[,c(3,10)],title ="Standard simulation and filtering")),
+#            ggmatrix_gtable(ggpairs(Simu4[,c(3,10)],title ="Simulation with fitted normal distribution and filtering")),
+#            ggmatrix_gtable(ggpairs(Simu5[,c(3,10)],title ="Simulation with a different normal distribution")),nrow=2)
+
+           
+```
+
+# Individus virtuels dans un intervalle en dehors du support de la population d'origine \>140
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique)
+
+### filtering pour conserver les individus satisfaisant un critere d'inclusion
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+# simulation de donnees avec la methode copule N=3000
+NN<-60000
+
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(NN,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+Simu_afiltrer<-PseudoObsInverse(Data_Originale,U_Simu)
+for (i in 1:2){Simu_afiltrer[,i] = as.factor(Simu_afiltrer[,i])}
+for (i in 3:8){Simu_afiltrer[,i] = as.numeric(as.character(Simu_afiltrer[,i]))}
+colnames(Simu_afiltrer)<-colnames(Data_Originale[,c(1:8)])
+levels(Simu_afiltrer[,1])<-c('No','Yes')
+levels(Simu_afiltrer[,2])<-c('<=25','25-35','>35')
+
+# Restriction de la population simulee par filtration : uniquement patient tel que glucose >= 140 
+# attention ... avec estimation empirique, toutes les simulation sont inférieures au max du support d'origine
+SimuVar6<-Simu_afiltrer[Simu_afiltrer$Glucose > 140,]
+# on garde uniquement N  individus au hasard
+SimuVar6<-SimuVar6[sample(1:nrow(SimuVar6), N), ]
+
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu6<-Simulation_DataOutcome(fit.rf, SimuVar6)
+
+######################  Representations graphiques    ######################################
+
+#ggpairs(SimuVar3)
+
+
+```
+
+# Individus virtuels dans un intervalle en dehors du support de la population d'origine \>140
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique) et une param
+
+### ici une gaussienne ajuste sur les données et tronquee a 140
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+######################################   fit de la meilleure distribution pour Glucose     ######################################
+######################  Preparation des donnees    ######################################
+# Modification des donnees univariee ... nouvelle variable glucose (simuler via modele parametrique normal tronquee) 
+#GlucoseNew<-rweibull(nrow(Data_Originale),shape=4.225,scale=134.705)
+
+GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 140, mean=mean(Data_Originale[,3]),sd=sd(Data_Originale[,3]))
+#hist(GlucoseNew)
+# definition de la  base de donnees 
+Data_modif<-cbind(Data_Originale[,1:2],GlucoseNew,Data_Originale[,4:8])
+
+# Simulation en fonction du modele de copule et des marginales (dont une modifiee)
+######################  SIMULATION    ######################################
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine (estimee sur donnees originales)
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+SimuVar7<-PseudoObsInverse(Data_modif,U_Simu)
+for (i in 1:2){SimuVar7[,i] = as.factor(SimuVar7[,i])}
+for (i in 3:8){SimuVar7[,i] = as.numeric(as.character(SimuVar7[,i]))}
+colnames(SimuVar7)<-colnames(Data_Originale[,c(1:8)])
+levels(SimuVar7[,1])<-c('No','Yes')
+levels(SimuVar7[,2])<-c('<=25','25-35','>35')
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu7<-Simulation_DataOutcome(fit.rf, SimuVar7)
+
+
+######################  Representations graphiques    ######################################
+#ggpairs(SimuVar2)
+
+```
+
+# Individus virtuels dans un intervalle en dehors du support de la population d'origine \>140
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique) et une param
+
+### Une marginale avec une loi parametrique differente (par ex biblio) de la loi des données ... ici lognormale tronquee
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+######################################   fit de la meilleure distribution pour Glucose     ######################################
+######################  Preparation des donnees    ######################################
+# Modification des donnees univariee ... nouvelle variable glucose (simuler via modele parametrique normal tronquee) 
+#GlucoseNew<-rweibull(nrow(Data_Originale),shape=4.225,scale=134.705)
+
+GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 140, mean=160,sd=50)
+#GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 101, b=150, mean=120,sd=30)
+#GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 170, mean=175,sd=180)
+
+
+# definition de la  base de donnees 
+Data_modif<-cbind(Data_Originale[,1:2],GlucoseNew,Data_Originale[,4:8])
+
+# Simulation en fonction du modele de copule et des marginales (dont une modifiee)
+######################  SIMULATION    ######################################
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine (estimee sur donnees originales)
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+SimuVar8<-PseudoObsInverse(Data_modif,U_Simu)
+for (i in 1:2){SimuVar8[,i] = as.factor(SimuVar8[,i])}
+for (i in 3:8){SimuVar8[,i] = as.numeric(as.character(SimuVar8[,i]))}
+colnames(SimuVar8)<-colnames(Data_Originale[,c(1:8)])
+levels(SimuVar8[,1])<-c('No','Yes')
+levels(SimuVar8[,2])<-c('<=25','25-35','>35')
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu8<-Simulation_DataOutcome(fit.rf, SimuVar8)
+
+
+######################  Representations graphiques    ######################################
+#ggpairs(SimuVar2)
+
+```
+
+# simulation en dehors du support d'origine \>140
+
+## Representation de certaines correlations pour donnees originales, simulees standard et filtering, simulee normal fit et filtering et simulee avec lognormal tronquee
+
+```{r,echo=F,message=F,fig.width=7, fig.height=6,dpi=600}
+
+colnames(Simu6)[9]<-"Prediction"
+colnames(Simu7)[9]<-"Prediction"
+colnames(Simu8)[9]<-"Prediction" 
+plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[Data_Originale[,3]>140,c(3,6,9)],title ="Filtering the original data")),
+           ggmatrix_gtable(ggpairs(Simu6[,c(3,6,9)],title ="Filtering the simulated data (based on empirical distribution)")),
+           ggmatrix_gtable(ggpairs(Simu7[,c(3,6,9)],title ="Filtering the simulated data (based on best Normal distribution)")),
+           ggmatrix_gtable(ggpairs(Simu8[,c(3,6,9)],title ="Filtering the simulated data (based on a given Normal distribution)")),nrow=2)
+           
+```
+
+# Individus virtuels dans un intervalle en dehors du support de la population d'origine \>170
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique)
+
+### filtering pour conserver les individus satisfaisant un critere d'inclusion
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+# simulation de donnees avec la methode copule N=3000
+NN<-60000
+
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(NN,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+Simu_afiltrer<-PseudoObsInverse(Data_Originale,U_Simu)
+for (i in 1:2){Simu_afiltrer[,i] = as.factor(Simu_afiltrer[,i])}
+for (i in 3:8){Simu_afiltrer[,i] = as.numeric(as.character(Simu_afiltrer[,i]))}
+colnames(Simu_afiltrer)<-colnames(Data_Originale[,c(1:8)])
+levels(Simu_afiltrer[,1])<-c('No','Yes')
+levels(Simu_afiltrer[,2])<-c('<=25','25-35','>35')
+
+# Restriction de la population simulee par filtration : uniquement patient tel que glucose >= 140 
+# attention ... avec estimation empirique, toutes les simulation sont inférieures au max du support d'origine
+SimuVar6<-Simu_afiltrer[Simu_afiltrer$Glucose > 170,]
+# on garde uniquement N  individus au hasard
+SimuVar6<-SimuVar6[sample(1:nrow(SimuVar6), N), ]
+
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu6<-Simulation_DataOutcome(fit.rf, SimuVar6)
+
+######################  Representations graphiques    ######################################
+
+#ggpairs(SimuVar3)
+
+
+```
+
+# Individus virtuels dans un intervalle en dehors du support de la population d'origine \>170
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique) et une param
+
+### ici une gaussienne ajuste sur les données et tronquee a 140
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+######################################   fit de la meilleure distribution pour Glucose     ######################################
+######################  Preparation des donnees    ######################################
+# Modification des donnees univariee ... nouvelle variable glucose (simuler via modele parametrique normal tronquee) 
+#GlucoseNew<-rweibull(nrow(Data_Originale),shape=4.225,scale=134.705)
+
+GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 170, mean=mean(Data_Originale[,3]),sd=sd(Data_Originale[,3]))
+#hist(GlucoseNew)
+# definition de la  base de donnees 
+Data_modif<-cbind(Data_Originale[,1:2],GlucoseNew,Data_Originale[,4:8])
+
+# Simulation en fonction du modele de copule et des marginales (dont une modifiee)
+######################  SIMULATION    ######################################
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine (estimee sur donnees originales)
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+SimuVar7<-PseudoObsInverse(Data_modif,U_Simu)
+for (i in 1:2){SimuVar7[,i] = as.factor(SimuVar7[,i])}
+for (i in 3:8){SimuVar7[,i] = as.numeric(as.character(SimuVar7[,i]))}
+colnames(SimuVar7)<-colnames(Data_Originale[,c(1:8)])
+levels(SimuVar7[,1])<-c('No','Yes')
+levels(SimuVar7[,2])<-c('<=25','25-35','>35')
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu7<-Simulation_DataOutcome(fit.rf, SimuVar7)
+
+
+######################  Representations graphiques    ######################################
+#ggpairs(SimuVar2)
+
+```
+
+# Individus virtuels dans un intervalle en dehors du support de la population d'origine \>170
+
+### simulations d'individus suivant les estimations de la copule et des marginales (empirique) et une param
+
+### Une marginale avec une loi parametrique differente (par ex biblio) de la loi des données ... ici lognormale tronquee
+
+```{r,echo=F,message=F,fig.width=12, fig.height=12}
+
+######################################   fit de la meilleure distribution pour Glucose     ######################################
+######################  Preparation des donnees    ######################################
+# Modification des donnees univariee ... nouvelle variable glucose (simuler via modele parametrique normal tronquee) 
+#GlucoseNew<-rweibull(nrow(Data_Originale),shape=4.225,scale=134.705)
+
+#GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 140, mean=160,sd=50)
+#GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 101, b=150, mean=120,sd=30)
+GlucoseNew <- rtruncnorm( nrow(Data_Originale), a= 170, mean=175,sd=180)
+
+
+# definition de la  base de donnees 
+Data_modif<-cbind(Data_Originale[,1:2],GlucoseNew,Data_Originale[,4:8])
+
+# Simulation en fonction du modele de copule et des marginales (dont une modifiee)
+######################  SIMULATION    ######################################
+## Simulation d'un echantillon d'uniformes a partir de la distribution de la vine (estimee sur donnees originales)
+# taille de l'echantillon definit avant
+U_Simu<-rvinecop(N,Fit_dist)
+
+# Simulation de patients virtuels avec la copule sur les donnees d'origine et une marginale modifiee
+SimuVar8<-PseudoObsInverse(Data_modif,U_Simu)
+for (i in 1:2){SimuVar8[,i] = as.factor(SimuVar8[,i])}
+for (i in 3:8){SimuVar8[,i] = as.numeric(as.character(SimuVar8[,i]))}
+colnames(SimuVar8)<-colnames(Data_Originale[,c(1:8)])
+levels(SimuVar8[,1])<-c('No','Yes')
+levels(SimuVar8[,2])<-c('<=25','25-35','>35')
+
+# prevision de l'outcome avec le modele random forest estimer (plus haut)
+###############  Prevision    ####################@
+Simu8<-Simulation_DataOutcome(fit.rf, SimuVar8)
+
+
+######################  Representations graphiques    ######################################
+#ggpairs(SimuVar2)
+
+```
+
+# simulation en dehors du support d'origine \>170
+
+## Representation de certaines correlations pour donnees originales, simulees standard et filtering, simulee normal fit et filtering et simulee avec lognormal tronquee
+
+```{r,echo=F,message=F,fig.width=7, fig.height=6,dpi=600}
+
+colnames(Simu6)[9]<-"Prediction"
+colnames(Simu7)[9]<-"Prediction"
+colnames(Simu8)[9]<-"Prediction" 
+plot_grid( ggmatrix_gtable(ggpairs(Data_Originale[Data_Originale[,3]>170,c(3,6,9)],title ="Filtering the original data")),
+           ggmatrix_gtable(ggpairs(Simu6[,c(3,6,9)],title ="Filtering the simulated data (based on empirical distribution)")),
+           ggmatrix_gtable(ggpairs(Simu7[,c(3,6,9)],title ="Filtering the simulated data (based on best Normal distribution)")),
+           ggmatrix_gtable(ggpairs(Simu8[,c(3,6,9)],title ="Filtering the simulated data (based on a given Normal distribution)")),nrow=2)
+           
+```
+
+## Calcul des p-values pour plusieurs simulations
+
+Le code R de cette section n'est pas evalue.
+
+```{r,echo=F,message=F,eval = FALSE}
+
+####################################################################
+##  P-value sur donnees originale (entre diabete et les autres variables)
+####################################################################
+  Pvalue_vraie<-NULL
+  Pvalue_vraie[1]<-chisq.test(Data_Originale[,1], Data_Originale[,9])$p.value
+  Pvalue_vraie[2]<-chisq.test(Data_Originale[,2], Data_Originale[,9])$p.value
+  for (i in 3:8) {  Pvalue_vraie[i]<-t.test(Data_Originale[,i] ~ Data_Originale[,9])$p.value  }
+  Pvalue_vraie
+
+
+####################################################################
+#### Boucle Simulation methode discrete
+####################################################################
+Mat_Pvalue_Disc_SE<-NULL
+Mat_Pvalue_Disc_AE<-NULL
+for (j in 1:Nsimu) { 
+  Simu_Cov<-NULL
+  Simu_Data<-NULL
+  Pvalue_SE<-NULL  
+  Pvalue_AE<-NULL  
+  Simu_Cov<-Simulation_Discrete(VPMod) 
+  Simu_Data<-Simulation_DataOutcome(fit.rf, Simu_Cov)
+  Pvalue_SE<-CalculPvalue(Simu_Data)$p_SE
+  Pvalue_AE<-CalculPvalue(Simu_Data)$p_AE
+  Mat_Pvalue_Disc_SE<-rbind(Mat_Pvalue_Disc_SE,Pvalue_SE)
+  Mat_Pvalue_Disc_AE<-rbind(Mat_Pvalue_Disc_AE,Pvalue_AE)
+}
+colnames(Mat_Pvalue_Disc_SE)<-colnames(VPMod)
+row.names(Mat_Pvalue_Disc_SE)<-c(1:nrow(Mat_Pvalue_Disc_SE))
+Mat_Pvalue_Disc_SE<-as.data.frame(Mat_Pvalue_Disc_SE)  
+colnames(Mat_Pvalue_Disc_AE)<-colnames(VPMod)
+row.names(Mat_Pvalue_Disc_AE)<-c(1:nrow(Mat_Pvalue_Disc_AE))
+Mat_Pvalue_Disc_AE<-as.data.frame(Mat_Pvalue_Disc_AE)
+  
+####################################################################
+#### Boucle Simulation methode continue
+####################################################################
+Mat_Pvalue_Cont_SE<-NULL
+Mat_Pvalue_Cont_AE<-NULL
+for (j in 1:Nsimu) { 
+  Simu_Cov<-NULL
+  Simu_Data<-NULL
+  Pvalue_SE<-NULL  
+  Pvalue_AE<-NULL  
+  Simu_Cov<-Simulation_Continue(VPMod) 
+  Simu_Data<-Simulation_DataOutcome(fit.rf, Simu_Cov)
+  Pvalue_SE<-CalculPvalue(Simu_Data)$p_SE
+  Pvalue_AE<-CalculPvalue(Simu_Data)$p_AE
+  Mat_Pvalue_Cont_SE<-rbind(Mat_Pvalue_Cont_SE,Pvalue_SE)
+  Mat_Pvalue_Cont_AE<-rbind(Mat_Pvalue_Cont_AE,Pvalue_AE)
+}
+colnames(Mat_Pvalue_Cont_SE)<-colnames(VPMod)
+row.names(Mat_Pvalue_Cont_SE)<-c(1:nrow(Mat_Pvalue_Cont_SE))
+Mat_Pvalue_Cont_SE<-as.data.frame(Mat_Pvalue_Cont_SE)  
+colnames(Mat_Pvalue_Cont_AE)<-colnames(VPMod)
+row.names(Mat_Pvalue_Cont_AE)<-c(1:nrow(Mat_Pvalue_Cont_AE))
+Mat_Pvalue_Cont_AE<-as.data.frame(Mat_Pvalue_Cont_AE)
+  
+####################################################################
+#### Boucle Simulation methode copule
+####################################################################
+Mat_Pvalue_Cop_SE<-NULL
+Mat_Pvalue_Cop_AE<-NULL
+for (j in 1:Nsimu) { 
+  Simu_Cov<-NULL
+  Simu_Data<-NULL
+  Pvalue_SE<-NULL  
+  Pvalue_AE<-NULL  
+  Simu_Cov<-Simulation_Copule(VPMod) 
+  Simu_Data<-Simulation_DataOutcome(fit.rf, Simu_Cov)
+  Pvalue_SE<-CalculPvalue(Simu_Data)$p_SE
+  Pvalue_AE<-CalculPvalue(Simu_Data)$p_AE
+  Mat_Pvalue_Cop_SE<-rbind(Mat_Pvalue_Cop_SE,Pvalue_SE)
+  Mat_Pvalue_Cop_AE<-rbind(Mat_Pvalue_Cop_AE,Pvalue_AE)
+  #print(j)
+}
+colnames(Mat_Pvalue_Cop_SE)<-colnames(VPMod)
+row.names(Mat_Pvalue_Cop_SE)<-c(1:nrow(Mat_Pvalue_Cop_SE))
+Mat_Pvalue_Cop_SE<-as.data.frame(Mat_Pvalue_Cop_SE)  
+colnames(Mat_Pvalue_Cop_AE)<-colnames(VPMod)
+row.names(Mat_Pvalue_Cop_AE)<-c(1:nrow(Mat_Pvalue_Cop_AE))
+Mat_Pvalue_Cop_AE<-as.data.frame(Mat_Pvalue_Cop_AE)
+
+```
+
+## Boxplots divers
+
+```{r,warning=F,echo=F,message=F,fig.width=8, fig.height=5,dpi=600,eval=F}
+# ## Boxplot P-value methode discrete
+# ############################################################
+# Plot_Discrete<-function(Mat_SE,Mat_AE,IndexVariable)  {
+#     vectorize_Pvalue<-NULL
+#     vectorize_Label<-NULL
+#     vectorize_Pvalue<-c(Mat_SE[,IndexVariable],Mat_AE[,IndexVariable])
+#     vectorize_Label<-as.factor(c(rep(0,Nsimu),rep(1,Nsimu)))
+#     vectorize<-cbind(vectorize_Pvalue,vectorize_Label)
+#     vectorize<-as.data.frame(vectorize) 
+#     vectorize[,2]<-as.factor(vectorize[,2])
+#     levels(vectorize[,2])<-c("Without error","With error")
+# 
+#     Plot_pvalue<-ggplot(vectorize) +  
+#                  geom_jitter(aes(x=vectorize_Label, y=vectorize_Pvalue,color = vectorize_Label), width=0.2, alpha=0.5) + 
+#                  geom_boxplot(aes(x=vectorize_Label, y=vectorize_Pvalue), width=0.1) +
+#                  scale_color_brewer(palette="Dark2") + theme(legend.position='none') +
+#                  stat_summary(geom = "point", mapping = aes(x=vectorize_Label, y=vectorize_Pvalue), fun = "mean",  shape=17, size=2) + 
+#                  labs(x ="Simulation Error", y = "P-value  Cov. x Diabete") +
+#                  ggtitle("P-value for discrete method \n True p-value =",round(Pvalue_vraie[IndexVariable],8)) +
+#                  theme(plot.title = element_text(hjust = 0.5))
+# }
+# 
+# ## Boxplot P-value methode continue
+# ############################################################
+# Plot_Continue<-function(Mat_SE,Mat_AE,IndexVariable)  {
+#     vectorize_Pvalue<-NULL
+#     vectorize_Label<-NULL
+#     vectorize_Pvalue<-c(Mat_SE[,IndexVariable],Mat_AE[,IndexVariable])
+#     vectorize_Label<-as.factor(c(rep(0,Nsimu),rep(1,Nsimu)))
+#     vectorize<-cbind(vectorize_Pvalue,vectorize_Label)
+#     vectorize<-as.data.frame(vectorize) 
+#     vectorize[,2]<-as.factor(vectorize[,2])
+#     levels(vectorize[,2])<-c("Without error","With error")
+# 
+#     Plot_pvalue<-ggplot(vectorize) +  
+#                  geom_jitter(aes(x=vectorize_Label, y=vectorize_Pvalue,color = vectorize_Label), width=0.2, alpha=0.5) + 
+#                  geom_boxplot(aes(x=vectorize_Label, y=vectorize_Pvalue), width=0.1) +
+#                  scale_color_brewer(palette="Dark2") + theme(legend.position='none') +
+#                  stat_summary(geom = "point", mapping = aes(x=vectorize_Label, y=vectorize_Pvalue), fun = "mean",  shape=17, size=2) + 
+#                  labs(x ="Simulation Error", y = "P-value  Cov. x Diabete") +
+#                  ggtitle("P-value for continuous method \n True p-value =",round(Pvalue_vraie[IndexVariable],8)) +
+#                  theme(plot.title = element_text(hjust = 0.5))
+# }
+# 
+# ## Boxplot P-value methode copule
+# ############################################################
+# Plot_Copule<-function(Mat_SE,Mat_AE,IndexVariable)  {
+#     vectorize_Pvalue<-NULL
+#     vectorize_Label<-NULL
+#     vectorize_Pvalue<-c(Mat_SE[,IndexVariable],Mat_AE[,IndexVariable])
+#     vectorize_Label<-as.factor(c(rep(0,Nsimu),rep(1,Nsimu)))
+#     vectorize<-cbind(vectorize_Pvalue,vectorize_Label)
+#     vectorize<-as.data.frame(vectorize) 
+#     vectorize[,2]<-as.factor(vectorize[,2])
+#     levels(vectorize[,2])<-c("Without error","With error")
+# 
+#     Plot_pvalue<-ggplot(vectorize) +  
+#                  geom_jitter(aes(x=vectorize_Label, y=vectorize_Pvalue,color = vectorize_Label), width=0.2, alpha=0.5) + 
+#                  geom_boxplot(aes(x=vectorize_Label, y=vectorize_Pvalue), width=0.1) +
+#                  scale_color_brewer(palette="Dark2") + theme(legend.position='none') +
+#                  stat_summary(geom = "point", mapping = aes(x=vectorize_Label, y=vectorize_Pvalue), fun = "mean",  shape=17, size=2) + 
+#                  labs(x ="Simulation Error", y = "P-value  Cov. x Diabete") +
+#                  ggtitle("P-value for copula method \n True p-value = ",round(Pvalue_vraie[IndexVariable],8)) +
+#                  theme(plot.title = element_text(hjust = 0.5))
+# }
+# 
+# ## Boxplot P-value avec les 3 methodes
+# ############################################################
+# Plot_3methode<-function(Mat_D,Mat_C,Mat_Cop,IndexVariable)  {
+#     vectorize_Pvalue<-NULL
+#     vectorize_Label<-NULL
+#     vectorize_Pvalue<-c(Mat_D[,IndexVariable],Mat_C[,IndexVariable],Mat_Cop[,IndexVariable])
+#     vectorize_Label<-as.factor(c(rep(0,Nsimu),rep(1,Nsimu),rep(2,Nsimu)))
+#     vectorize<-cbind(vectorize_Pvalue,vectorize_Label)
+#     vectorize<-as.data.frame(vectorize) 
+#     vectorize[,2]<-as.factor(vectorize[,2])
+#     levels(vectorize[,2])<-c("Discrete","Continuous", "Copula")
+# 
+#     Plot_pvalue<-ggplot(vectorize) +  
+#                  geom_jitter(aes(x=vectorize_Label, y=vectorize_Pvalue,color = vectorize_Label), width=0.2, alpha=0.5) + 
+#                  geom_boxplot(aes(x=vectorize_Label, y=vectorize_Pvalue), width=0.1) +
+#                  scale_color_brewer(palette="Dark2") + theme(legend.position='none') +
+#                  stat_summary(geom = "point", mapping = aes(x=vectorize_Label, y=vectorize_Pvalue), fun = "mean",  shape=17, size=2) + 
+#                  labs(x ="P-value", y = "P-value  Cov. x Diabete") +
+#                  ggtitle("P-value for the three methods \n True p-value = ",round(Pvalue_vraie[IndexVariable],8)) +
+#                  theme(plot.title = element_text(hjust = 0.5))
+# }
+
+
+#############  Representation  ############################
+# P_Disc_1<-Plot_Discrete(Mat_Pvalue_Disc_SE,Mat_Pvalue_Disc_AE,1)
+# P_Disc_2<-Plot_Discrete(Mat_Pvalue_Disc_SE,Mat_Pvalue_Disc_AE,2)
+# P_Disc_3<-Plot_Discrete(Mat_Pvalue_Disc_SE,Mat_Pvalue_Disc_AE,3)
+# P_Disc_4<-Plot_Discrete(Mat_Pvalue_Disc_SE,Mat_Pvalue_Disc_AE,4)
+# P_Disc_5<-Plot_Discrete(Mat_Pvalue_Disc_SE,Mat_Pvalue_Disc_AE,5)
+# P_Disc_6<-Plot_Discrete(Mat_Pvalue_Disc_SE,Mat_Pvalue_Disc_AE,6)
+# P_Disc_7<-Plot_Discrete(Mat_Pvalue_Disc_SE,Mat_Pvalue_Disc_AE,7)
+# P_Disc_8<-Plot_Discrete(Mat_Pvalue_Disc_SE,Mat_Pvalue_Disc_AE,8)
+# 
+# P_Cont_1<-Plot_Continue(Mat_Pvalue_Cont_SE,Mat_Pvalue_Cont_AE,1)
+# P_Cont_2<-Plot_Continue(Mat_Pvalue_Cont_SE,Mat_Pvalue_Cont_AE,2)
+# P_Cont_3<-Plot_Continue(Mat_Pvalue_Cont_SE,Mat_Pvalue_Cont_AE,3)
+# P_Cont_4<-Plot_Continue(Mat_Pvalue_Cont_SE,Mat_Pvalue_Cont_AE,4)
+# P_Cont_5<-Plot_Continue(Mat_Pvalue_Cont_SE,Mat_Pvalue_Cont_AE,5)
+# P_Cont_6<-Plot_Continue(Mat_Pvalue_Cont_SE,Mat_Pvalue_Cont_AE,6)
+# P_Cont_7<-Plot_Continue(Mat_Pvalue_Cont_SE,Mat_Pvalue_Cont_AE,7)
+# P_Cont_8<-Plot_Continue(Mat_Pvalue_Cont_SE,Mat_Pvalue_Cont_AE,8)
+# 
+# P_Cop_1<-Plot_Copule(Mat_Pvalue_Cop_SE,Mat_Pvalue_Cop_AE,1)
+# P_Cop_2<-Plot_Copule(Mat_Pvalue_Cop_SE,Mat_Pvalue_Cop_AE,2)
+# P_Cop_3<-Plot_Copule(Mat_Pvalue_Cop_SE,Mat_Pvalue_Cop_AE,3)
+# P_Cop_4<-Plot_Copule(Mat_Pvalue_Cop_SE,Mat_Pvalue_Cop_AE,4)
+# P_Cop_5<-Plot_Copule(Mat_Pvalue_Cop_SE,Mat_Pvalue_Cop_AE,5)
+# P_Cop_6<-Plot_Copule(Mat_Pvalue_Cop_SE,Mat_Pvalue_Cop_AE,6)
+# P_Cop_7<-Plot_Copule(Mat_Pvalue_Cop_SE,Mat_Pvalue_Cop_AE,7)
+# P_Cop_8<-Plot_Copule(Mat_Pvalue_Cop_SE,Mat_Pvalue_Cop_AE,8)
+# 
+# plot_grid(P_Disc_1,P_Disc_2,P_Disc_3,P_Disc_4,P_Disc_5,P_Disc_6,P_Disc_7,P_Disc_8,nrow=2)
+# plot_grid(P_Cont_1,P_Cont_2,P_Cont_3,P_Cont_4,P_Cont_5,P_Cont_6,P_Cont_7,P_Cont_8,nrow=2)
+# plot_grid(P_Cop_1,P_Cop_2,P_Cop_3,P_Cop_4,P_Cop_5,P_Cop_6,P_Cop_7,P_Cop_8,nrow=2)
+
+# 3 graphs erreur vs. sans erreur
+# Graph avec boxplot pour chaque methode (meme graph) pour chaque covariable
+# Tableau : vraie p-value et m??diane (+ moyenne ?)
+
+
+
+##### grah simulation avec erreur et sans erreur 
+###########
+
+####  Fonction pour 'vectoriser' les p-values (on ajoute une variable pour la methode et une pour erreur ou pas)
+Vectorize<-function(IndexVariable)  {
+    vectorize_Pvalue_Disc<-NULL
+    vectorize_Label_Disc<-NULL
+    vectorize_Pvalue_Disc<-c(Mat_Pvalue_Disc_SE[,IndexVariable],Mat_Pvalue_Disc_AE[,IndexVariable])
+    vectorize_Label_Disc<-as.factor(c(rep(0,Nsimu),rep(1,Nsimu)))
+    vectorize_Disc<-cbind(vectorize_Pvalue_Disc,vectorize_Label_Disc,rep(1,length(vectorize_Label_Disc)))
+    vectorize_Disc<-as.data.frame(vectorize_Disc) 
+    vectorize_Disc[,2]<-as.factor(vectorize_Disc[,2])
+    vectorize_Disc[,3]<-as.factor(vectorize_Disc[,3])
+    levels(vectorize_Disc[,2])<-c("Without error","With error")
+    levels(vectorize_Disc[,3])<-c("Discrete method")
+    colnames(vectorize_Disc)<-c("P_value","Error","Method")
+        
+    vectorize_Pvalue_Cont<-NULL
+    vectorize_Label_Cont<-NULL
+    vectorize_Pvalue_Cont<-c(Mat_Pvalue_Cont_SE[,IndexVariable],Mat_Pvalue_Cont_AE[,IndexVariable])
+    vectorize_Label_Cont<-as.factor(c(rep(0,Nsimu),rep(1,Nsimu)))
+    vectorize_Cont<-cbind(vectorize_Pvalue_Cont,vectorize_Label_Cont,rep(1,length(vectorize_Label_Cont)))
+    vectorize_Cont<-as.data.frame(vectorize_Cont) 
+    vectorize_Cont[,2]<-as.factor(vectorize_Cont[,2])
+    vectorize_Cont[,3]<-as.factor(vectorize_Cont[,3])
+    levels(vectorize_Cont[,2])<-c("Without error","With error")
+    levels(vectorize_Cont[,3])<-c("Continuous method")    
+    colnames(vectorize_Cont)<-c("P_value","Error","Method")
+        
+    vectorize_Pvalue_Cop<-NULL
+    vectorize_Label_Cop<-NULL
+    vectorize_Pvalue_Cop<-c(Mat_Pvalue_Cop_SE[,IndexVariable],Mat_Pvalue_Cop_AE[,IndexVariable])
+    vectorize_Label_Cop<-as.factor(c(rep(0,Nsimu),rep(1,Nsimu)))
+    vectorize_Cop<-cbind(vectorize_Pvalue_Cop,vectorize_Label_Cop,rep(1,length(vectorize_Label_Cop)))
+    vectorize_Cop<-as.data.frame(vectorize_Cop) 
+    vectorize_Cop[,2]<-as.factor(vectorize_Cop[,2])
+    vectorize_Cop[,3]<-as.factor(vectorize_Cop[,3])
+    levels(vectorize_Cop[,2])<-c("Without error","With error")
+    levels(vectorize_Cop[,3])<-c("Copula method")
+    colnames(vectorize_Cop)<-c("P_value","Error","Method")
+    vectorize<-NULL
+    vectorize<-rbind(vectorize_Disc,vectorize_Cont,vectorize_Cop)
+      }
+ 
+    
+###  Plot pour la variable 1 : pregnancie    
+ggplot(Vectorize(1) ,aes(x=Error, y=P_value,fill=Method)) +  
+                 geom_jitter(position=position_jitter(width=0.3), aes(colour=Method), alpha=0.9) +
+                 geom_boxplot(alpha = 0.5, show.legend = FALSE, aes(fill=Method)) +  
+                 facet_grid(.~Method, labeller = as_labeller(Vectorize(1)$Method))  +
+                 theme(strip.text.x = element_text(size=9, color="black", face="bold")) +
+                 labs(y="P-value : Pronostic vs. Pregnancie", x="Error in simulation") +
+                 ggtitle(paste("Chi-2 test \n","Pronostic vs. Pregnancy \n","True p-value =",round(Pvalue_vraie[1],5))) +
+                 theme(plot.title = element_text(hjust = 0.5))  +
+                  scale_fill_manual(values=c("gainsboro", "gray47", "gray0")) +
+                  scale_color_manual(values=c("gainsboro", "gray47", "gray0"))      
+                 # scale_fill_manual(values=c("#00AFBB", "#E7B800", "#FC4E07")) +
+                 # scale_color_manual(values=c("#00AFBB", "#E7B800", "#FC4E07"))  
+
+
+###  Plot pour la variable 4 : BloodPressure  
+ggplot(Vectorize(4) ,aes(x=Error, y=P_value,fill=Method)) +  
+                 geom_jitter(position=position_jitter(width=0.3), aes(colour=Method), alpha=0.9) +
+                 geom_boxplot(alpha = 0.5, show.legend = FALSE, aes(fill=Method)) +  
+                 facet_grid(.~Method, labeller = as_labeller(Vectorize(4)$Method))  +
+                 theme(strip.text.x = element_text(size=9, color="black", face="bold")) +
+                 labs(y="P-value : Pronostic vs. BloodPressure", x="Error in simulation") +
+                 ggtitle(paste("Student test \n","Pronostic vs. BloodPressure \n","True p-value =",round(Pvalue_vraie[4],5))) +
+                 theme(plot.title = element_text(hjust = 0.5)) +
+                 scale_fill_manual(values=c("gainsboro", "gray47", "gray0")) +
+                 scale_color_manual(values=c("gainsboro", "gray47", "gray0"))      
+                   
+###  Plot pour la variable 6 : Insulin  
+ggplot(Vectorize(6) ,aes(x=Error, y=P_value,fill=Method)) +  
+                 geom_jitter(position=position_jitter(width=0.3), aes(colour=Method), alpha=0.9) +
+                 geom_boxplot(alpha = 0.5, show.legend = FALSE, aes(fill=Method)) +  
+                 facet_grid(.~Method, labeller = as_labeller(Vectorize(6)$Method))  +
+                 theme(strip.text.x = element_text(size=9, color="black", face="bold")) +
+                 labs(y="P-value : Pronostic vs. Insulin", x="Error in simulation") +
+                 ggtitle(paste("Student test \n","Pronostic vs. Insulin \n","True p-value =",round(Pvalue_vraie[6],5))) +
+                 theme(plot.title = element_text(hjust = 0.5)) +
+                  scale_fill_manual(values=c("gainsboro", "gray47", "gray0")) +
+                  scale_color_manual(values=c("gainsboro", "gray47", "gray0"))       
+    
+###  Plot pour la variable 7 : DiabetesPedigreeFunction  
+ggplot(Vectorize(7) ,aes(x=Error, y=P_value,fill=Method)) +  
+                 geom_jitter(position=position_jitter(width=0.3), aes(colour=Method), alpha=0.9) +
+                 geom_boxplot(alpha = 0.5, show.legend = FALSE, aes(fill=Method)) +  
+                 facet_grid(.~Method, labeller = as_labeller(Vectorize(7)$Method))  +
+                 theme(strip.text.x = element_text(size=9, color="black", face="bold")) +
+                 labs(y="P-value : Pronostic vs. DiabetesPedigreeFunction", x="Error in simulation") +
+                 ggtitle(paste("Student test \n","Pronostic vs. DiabetesPedigreeFunction \n","True p-value =",round(Pvalue_vraie[7],5))) +
+                 theme(plot.title = element_text(hjust = 0.5)) +
+                  scale_fill_manual(values=c("gainsboro", "gray47", "gray0")) +
+                  scale_color_manual(values=c("gainsboro", "gray47", "gray0")) 
+
+    
+    
+    
+    
+
+#### comparaison des 3 m??thodes (avec erreur)
+###########
+# variable 4 : p-value = 0.0002
+# Plot_3methode(Mat_Pvalue_Disc_AE,Mat_Pvalue_Cont_AE,Mat_Pvalue_Cop_AE,4)
+# cat("True p-value =",Pvalue_vraie[4],"\n")
+# cat("Median p-value (Discrete method) =",median(Mat_Pvalue_Disc_AE[,4]),"\n")
+# cat("Median p-value (Continuous method) =",median(Mat_Pvalue_Cont_AE[,4]),"\n")
+# cat("Median p-value (Copula method) =",median(Mat_Pvalue_Cop_AE[,4]),"\n")
+# 
+# # variable 6 : p-value < 10^-7
+# Plot_3methode(Mat_Pvalue_Disc_AE,Mat_Pvalue_Cont_AE,Mat_Pvalue_Cop_AE,6)
+# cat("True p-value =",Pvalue_vraie[6],"\n")
+# cat("Median p-value (Discrete method) =",median(Mat_Pvalue_Disc_AE[,6]),"\n")
+# cat("Median p-value (Continuous method) =",median(Mat_Pvalue_Cont_AE[,6]),"\n")
+# cat("Median p-value (Copula method) =",median(Mat_Pvalue_Cop_AE[,6]),"\n")
+
+
+
+
+
+```
